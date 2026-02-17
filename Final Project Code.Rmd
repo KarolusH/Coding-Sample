@@ -1,0 +1,1034 @@
+---
+title: "635 Data Cleaning"
+author: "Charles Huang"
+date: "2025-02-15"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+```
+
+## GSS
+```{r}
+GSS <- read.csv("C:/Users/karol/Desktop/Spring 2025/POLSCI 635/GSS/anes_timeseries_2020_gss_csv_20220408/anes_timeseries_2020_gss_csv_20220408.csv")
+```
+
+## ANES
+```{r}
+ANES <- read.csv("C:/Users/karol/Desktop/Spring 2025/POLSCI 635/ANES/anes_timeseries_2020_csv_20220210/anes_timeseries_2020_csv_20220210.csv")
+library(dplyr)
+library(ggplot2)
+library(tikzDevice)
+# those who completed both PRE and POST
+ANES_prepost <- ANES[ANES$V200004 == 3, ]
+# removing four ineligible cases
+ANES_prepost <- ANES_prepost[!ANES_prepost$V200001 %in% c(333168, 350453, 347372, 414401), ]
+
+# change the coding scheme for three social media platforms (post frequency)
+ANES_prepost <- ANES_prepost %>%
+  mutate(V202543 = case_when(
+    V202543 == 1 ~ 5,
+    V202543 == 2 ~ 4,
+    V202543 == 4 ~ 2,
+    V202543 == 5 ~ 1,
+    V202543 == 3 ~ 3
+  ))
+ANES_prepost <- ANES_prepost %>%
+  mutate(V202545 = case_when(
+    V202545 == 1 ~ 5,
+    V202545 == 2 ~ 4,
+    V202545 == 4 ~ 2,
+    V202545 == 5 ~ 1,
+    V202545 == 3 ~ 3
+  ))
+ANES_prepost <- ANES_prepost %>%
+  mutate(V202547 = case_when(
+    V202547 == 1 ~ 5,
+    V202547 == 2 ~ 4,
+    V202547 == 4 ~ 2,
+    V202547 == 5 ~ 1,
+    V202547 == 3 ~ 3
+  ))
+
+
+# recode sex
+ANES_prepost <- ANES_prepost %>% 
+  mutate(V201600 = case_when(
+    V201600 == 2 ~ 1, # female
+    V201600 == 1 ~ 0  # male
+  ))
+
+hist(ANES_prepost$V202029)
+hist(ANES_prepost$V202543)
+
+#######################
+# histograms of trust #
+#######################
+hist(ANES_prepost$V201233)
+# weights
+design_prepost <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = TRUE,
+  data = ANES_prepost
+)
+design_trust <- subset(design_prepost, V201233 >= 0)
+# weighted histogram @ trust
+hist_trust <- svyhist(~V201233, design_trust,
+        main = "Figure 1: Histogram of Trust Towards the Government",
+        xlab = "Trust Level",
+        ylab = "Frequency",
+        col = "grey",
+        border = "white")
+# save as pdf 
+pdf("histogram_trust_weighted.pdf", width = 7, height = 5)
+par(mar = c(6, 4, 4, 2) + 0.1, mgp = c(2, 0.3, 0))
+svyhist(~V201233, design_trust,
+        main = "Figure 1: Histogram of Trust Towards the Government",
+        xlab = "Trust Scale",
+        ylab = "Frequency",
+        col = "grey",
+        border = "white",
+        breaks = seq(0.75, 5.25, by = 0.5)) #thinner bars w/ breaks
+box(which = "plot", lty = "solid", col = "black") # box around
+mtext("Note: Data from ANES 2020. N = 7,420. Distribution adjusted for survey weights.", 
+      side = 1, line = 4, cex = 0.75, adj = 0)
+mtext("Higher values indicate less trust (scale: 1-5).", 
+      side = 1, line = 5, cex = 0.75, adj = 0)
+dev.off()
+
+# unweighted histogram 
+histdata_trust <- ANES_prepost$V201233[ANES_prepost$V201233 >= 0]
+fhistdata_trust <- as.data.frame(histdata_trust)
+hist_trust <- ggplot(fhistdata_trust, aes(x = histdata_trust)) +
+  geom_histogram(fill = "grey", color = "white") +
+  labs(title = "Histogram of Trust (unweighted)",
+       x = "Trust Level",
+       y = "Frequency") +
+      theme_minimal() + 
+      theme_bw() + 
+      theme(
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank(),  # Remove minor grid lines
+    panel.border = element_rect(color = "black", fill = NA)  # Keep the border
+  )
+       
+ggsave("histogram_trust.pdf", hist_trust, width = 6, height = 4)
+```
+
+## online comment
+```{r, message = F}
+library(fastDummies)
+# manipulation
+ANES_202029_1 <- ANES_prepost[,c("V200010b", "V200010c", "V200010d", "V202029", "V201233", "V201231x", "V201600", "V201507x", "V201511x", "V201617x", "V201005", "V201237")]
+ANES_202029_2 <- ANES_prepost[,c("V200010b", "V200010c", "V200010d", "V202029", "V201233", "V201231x", "V201600", "V201507x", "V201511x", "V201617x", "V201005", "V201237")]
+
+ANES_202029_1 <- ANES_202029_1[apply(ANES_202029_1, 1, function(row) all(row >= 0)), ]
+ANES_202029_1 <- na.omit(ANES_202029_1)
+
+ANES_202029_2 <- ANES_202029_2[apply(ANES_202029_2, 1, function(row) all(row >= 0)), ]
+ANES_202029_2 <- na.omit(ANES_202029_2)
+
+# recode comment 1/0
+ANES_202029_1 <- ANES_202029_1 %>% 
+  mutate(V202029i = case_when(
+    V202029 == "1" ~ 1,
+    V202029 == "2" ~ 0
+  ))
+ANES_202029_2 <- ANES_202029_2 %>% 
+  mutate(V202029i = case_when(
+    V202029 == "1" ~ 1,
+    V202029 == "2" ~ 0
+  ))
+
+## for pid
+ANES_202029_2D <- ANES_202029_2 %>% 
+  filter(V201231x <= 4)
+ANES_202029_2D <- ANES_202029_2D %>%
+  mutate(V201231x = case_when(
+    V201231x == 4 ~ 0,
+    V201231x == 3 ~ 1,
+    V201231x == 2 ~ 2,
+    V201231x == 1 ~ 3
+  ))
+
+
+ANES_202029_2R <- ANES_202029_2 %>% 
+  filter(V201231x >= 4)
+ANES_202029_2R <- ANES_202029_2R %>%
+  mutate(V201231x = case_when(
+    V201231x == 4 ~ 0,
+    V201231x == 5 ~ 1,
+    V201231x == 6 ~ 2,
+    V201231x == 7 ~ 3
+  ))
+
+# factor trust and pid + relevel 
+ANES_202029_1$V201233 <- as.factor(ANES_202029_1$V201233)
+ANES_202029_1$V201233 <- relevel(ANES_202029_1$V201233, ref = "1")
+ANES_202029_1$V201231x <- as.factor(ANES_202029_1$V201231x)
+ANES_202029_1$V201231x <- relevel(ANES_202029_1$V201231x, ref = "4")
+
+ANES_202029_2D$V201233 <- as.factor(ANES_202029_2D$V201233)
+ANES_202029_2D$V201233 <- relevel(ANES_202029_2D$V201233, ref = "1")
+ANES_202029_2R$V201233 <- as.factor(ANES_202029_2R$V201233)
+ANES_202029_2R$V201233 <- relevel(ANES_202029_2R$V201233, ref = "1")
+
+# survey package 
+library(survey)
+design_202029 <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = T,
+  data = ANES_202029_1
+)
+design_202029_2D <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = T,
+  data = ANES_202029_2D
+)
+design_202029_2R <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = T,
+  data = ANES_202029_2R
+)
+
+# logistic regression
+m_202029 <- svyglm(V202029i ~ V201231x + V201233 + V201511x + V201507x + V201005 + V201600, 
+                         design = design_202029, 
+                         family = binomial)
+summary(m_202029)
+m_202029_2D <- svyglm(V202029i ~ V201231x * V201233 + V201511x + V201507x + V201005 + V201600, 
+                         design = design_202029_2D, 
+                         family = binomial)
+summary(m_202029_2D)
+m_202029_2R <- svyglm(V202029i ~ V201231x * V201233 + V201511x + V201507x + V201005 + V201600, 
+                         design = design_202029_2R, 
+                         family = binomial)
+summary(m_202029_2R)
+```
+
+### base plot 
+```{r}
+m202029_summary <- summary(m_202029)
+ctable_202029 <- m202029_summary$coefficients
+
+ratios_202029 <- data.frame(
+  variable = rownames(ctable_202029),
+  coef = ctable_202029[, "Estimate"],
+  se = ctable_202029[, "Std. Error"],
+  p_value = ctable_202029[, "Pr(>|t|)"]
+)
+ratios_202029 <- ratios_202029 %>%
+  mutate(
+    odds_ratio = exp(coef),
+    ci_lower = exp(coef - 1.96 * se),
+    ci_upper = exp(coef + 1.96 * se)
+  )
+v202029_odds <- ratios_202029 %>%
+  filter(grepl("V201233", variable))
+v202029_odds$level <- gsub("V201233", "Level ", v202029_odds$variable)
+
+content_base <- ggplot(v202029_odds, aes(x = variable, y = odds_ratio)) +
+  geom_point() +  # Plot the odds ratio as a point
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +  # Add CI bars
+  # coord_flip() ## no flip here 
+  theme_minimal() +
+  labs(title = "Figure 2: Coefficient Estimates of Trust on Posting Political Content",
+       caption = "Note: Bars represent 95% confidence intervals, estimates in odds ratios",
+       x = "Trust",
+       y = "Odds Ratio") +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+      theme_bw() + 
+      theme(
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank(),  # Remove minor grid lines
+    panel.border = element_rect(color = "black", fill = NA), # Keep the border
+    plot.title = element_text(hjust = 0, size = 11, face = "bold"),
+    plot.caption = element_text(hjust = 0, size = 9)
+  ) + 
+  scale_x_discrete(labels = c("Most of the time", "About half of the time", "Some of the time", "Never")) +
+  scale_y_continuous(limits = c(0, 5), breaks = seq(0, 5, by = 1)) # scale 0-5
+
+ggsave("content_base.pdf", content_base, width = 6, height = 4)
+```
+
+### base plot w/ id
+```{r}
+library(broom)
+get_interaction_coefs <- function(model, model_name) {
+  # Extract coefficients with standard errors and confidence intervals
+  coefs <- tidy(model, conf.int = TRUE, exponentiate = TRUE)
+  # Filter only the interaction terms we want
+  interactions <- coefs %>%
+    filter(grepl("V201231x:V201233", term)) %>%
+    mutate(model = model_name)
+  return(interactions)
+}
+
+coefs_1D <- get_interaction_coefs(m_202029_2D, "Democrats")
+coefs_1D <- coefs_1D %>%
+  mutate(term = case_when(
+    grepl("V201231x:V201233.?2", term) ~ "Trust: Most of the time",
+    grepl("V201231x:V201233.?3", term) ~ "Trust: About half of the time",
+    grepl("V201231x:V201233.?4", term) ~ "Trust: Some of the time",
+    grepl("V201231x:V201233.?5", term) ~ "Trust: Never",
+    TRUE ~ term
+  )) %>%
+  mutate(term = factor(term, 
+                      levels = c("Trust: Most of the time", 
+                                "Trust: About half of the time",
+                                "Trust: Some of the time",
+                                "Trust: Never")))
+  
+coefs_1R <- get_interaction_coefs(m_202029_2R, "Republicans")
+
+coefs_1 <- bind_rows(coefs_1D, coefs_1R)
+coefs_1 <- coefs_1 %>%
+  mutate(term = case_when(
+    grepl("V201231x:V201233.?2", term) ~ "Trust: Most of the time",
+    grepl("V201231x:V201233.?3", term) ~ "Trust: About half of the time",
+    grepl("V201231x:V201233.?4", term) ~ "Trust: Some of the time",
+    grepl("V201231x:V201233.?5", term) ~ "Trust: Never",
+    TRUE ~ term
+  )) %>%
+  mutate(term = factor(term, 
+                      levels = c("Trust: Most of the time", 
+                                "Trust: About half of the time",
+                                "Trust: Some of the time",
+                                "Trust: Never")))
+
+content_interaction <- ggplot(coefs_1, aes(x = estimate, y = term, color = model)) +
+  geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), 
+                height = 0.2, position = position_dodge(width = 0.5)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "darkgray") +
+  scale_x_log10() +  # Use log scale for odds ratios
+  scale_color_manual(values = c("Democrats" = "blue", "Republicans" = "red")) +
+  labs(title = "",
+       x = "Odds Ratio",
+       y = "",
+       color = "Party ID Subset") +
+      theme_bw() + 
+      theme(
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank(),  # Remove minor grid lines
+    panel.border = element_rect(color = "black", fill = NA)  # Keep the border
+  ) + 
+  theme(legend.position = "bottom")
+ggsave("content_interaction.pdf", content_interaction, width = 8, height = 6)
+
+# separated plots side by side
+library(gridExtra)
+library(grid)
+# create title
+title_cic <- textGrob("Figure 4: Coefficient Estimates of Trust on Online Political Events Participation",
+                  gp = gpar(fontsize = 13, fontface = "bold"),
+                  x = 0.02, hjust = 0)
+
+# Create note
+note_cic <- textGrob("Note: Bars represent 95% confidence intervals, estimates in odds ratios.",
+                 gp = gpar(fontsize = 10),
+                 x = 0.02, hjust = 0)  # Left-aligned
+## dem
+content_interaction_D <- ggplot(coefs_1D, aes(x = estimate, y = term)) +
+  geom_point(color = "black", size = 2) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), 
+                 height = 0.2, color = "black") +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "darkgray") +
+  scale_x_log10(breaks = c(0, 1, 2, 3, 4, 5),
+                labels = c("0", "1", "2", "3", "4", "5")) +
+  labs(title = "Democrats",
+       x = "Odds Ratio",
+       y = "") +
+  theme_bw() + 
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA),
+  )
+
+## gop
+content_interaction_R <- ggplot(coefs_1R, aes(x = estimate, y = term)) +
+  geom_point(color = "black", size = 2) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), 
+                 height = 0.2, color = "black") +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "darkgray") +
+  scale_x_log10(breaks = c(0, 1, 2, 3, 4),
+                labels = c("0", "1", "2", "3", "4")) +
+  labs(title = "Republicans",
+       x = "Odds Ratio",
+       y = "") +
+  theme_bw() + 
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA),
+    axis.text.y = element_blank(),  # Remove y-axis text
+    axis.ticks.y = element_blank()
+  )
+
+content_interaction_combined <- grid.arrange(content_interaction_D, content_interaction_R, ncol = 2, widths = c(3, 2), top = title_cic, bottom = note_cic)
+ggsave("content_interaction_sepd.pdf", content_interaction_combined, width = 9, height = 4)
+```
+
+### interaction plot
+```{r}
+trust_levels <- c(
+  "2" = "Most of the time",
+  "3" = "About half of the time",
+  "4" = "Some of the time", 
+  "5" = "Never"
+)
+
+race_levels <- c(
+  "2" = "Black",
+  "3" = "Hispanic",
+  "4" = "AANHPI",
+  "5" = "Native American/Alaskan",
+  "6" = "Multiple races"
+)
+
+m202029L_summary <- summary(m_202029_2a)
+ctable_202029L <- m202029L_summary$coefficients
+
+ratios_202029L <- data.frame(
+  variable = rownames(ctable_202029L),
+  coef = ctable_202029L[, "Estimate"],
+  se = ctable_202029L[, "Std. Error"],
+  p_value = ctable_202029L[, "Pr(>|t|)"]
+)
+ratios_202029L <- ratios_202029L %>%
+  mutate(
+    odds_ratio = exp(coef),
+    ci_lower = exp(coef - 1.96 * se),
+    ci_upper = exp(coef + 1.96 * se)
+  )
+
+v202029L_odds <- ratios_202029L %>%
+  filter(grepl("V201233\\d+:V201549x\\d+", variable))
+
+v202029L_odds$trust_level <- as.numeric(stringr::str_extract(v202029L_odds$variable, "(?<=V201233)\\d+"))
+v202029L_odds$race_level <- as.numeric(stringr::str_extract(v202029L_odds$variable, "(?<=V201549x)\\d+"))
+
+v202029L_odds$level <- paste0(
+  trust_levels[as.character(v202029L_odds$trust_level)], " x ",race_levels[as.character(v202029L_odds$race_level)]
+)
+
+v202029L_odds$ordered_var <- factor(
+  v202029L_odds$level, 
+  levels = unique(v202029L_odds$level[order(v202029L_odds$trust_level, v202029L_odds$race_level)])
+)
+
+ggplot(v202029L_odds, aes(x = ordered_var, y = odds_ratio)) +
+  geom_point(size = 1.5) +  
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) + 
+  coord_flip() +
+  theme_minimal() +
+  labs(x = "Trust × Race/Ethnicity Categories",
+       y = "Odds Ratio",
+       title = "Conditional Effects of Trust on Posting Content",
+       subtitle = "with 95% confidence intervals") +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red", alpha = 0.7) +
+  theme(axis.text.y = element_text(hjust = 0),
+        plot.title = element_text(face = "bold"),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(fill = NA, color = "gray80"))
+```
+
+## political post on social media 2543/2541a
+```{r, message = F}
+################
+# DV: FACEBOOK #
+################
+ANES_202543 <- ANES_prepost[ ,c("V200010b", "V200010c", "V200010d", "V202541a", "V202543", "V201233", "V201511x", "V201231x", "V201600", "V201507x", "V201005")]
+ANES_202543 <- ANES_202543[apply(ANES_202543, 1, function(row) all(row >= 0)), ]
+ANES_202543 <- ANES_202543 %>% filter(V202541a == 1)
+ANES_202543 <- na.omit(ANES_202543)
+
+# factor and relevel
+ANES_202543$V201233 <- as.factor(ANES_202543$V201233)
+ANES_202543$V201233 <- relevel(ANES_202543$V201233, ref = "1")
+ANES_202543$V201231x <- as.factor(ANES_202543$V201231x)
+ANES_202543$V201231x <- relevel(ANES_202543$V201231x, ref = "4")
+
+# design
+design_202543 <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = T,
+  data = ANES_202543
+)
+
+# ols regression
+m_202543 <- svyglm(V202543 ~ V201233 + V201231x + V201511x + V201600 + V201005 + V201507x, design = design_202543, family = gaussian())
+summary(m_202543)
+
+###############
+# DV: TWITTER #
+###############
+ANES_202545 <- ANES_prepost[ ,c("V200010b", "V200010c", "V200010d", "V202541b", "V202545", "V201233", "V201511x", "V201231x", "V201600", "V201507x", "V201005")]
+ANES_202545 <- ANES_202545[apply(ANES_202545, 1, function(row) all(row >= 0)), ]
+ANES_202545 <- ANES_202545 %>% filter(V202541b == 1)
+ANES_202545 <- na.omit(ANES_202545)
+
+# factor and relevel
+ANES_202545$V201233 <- as.factor(ANES_202545$V201233)
+ANES_202545$V201233 <- relevel(ANES_202545$V201233, ref = "1")
+ANES_202545$V201231x <- as.factor(ANES_202545$V201231x)
+ANES_202545$V201231x <- relevel(ANES_202545$V201231x, ref = "4")
+
+# design
+design_202545 <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = T,
+  data = ANES_202545
+)
+
+# ols regression
+m_202545 <- svyglm(V202545 ~ V201233 + V201231x + V201511x + V201600 + V201005 + V201507x, design = design_202545, family = gaussian())
+summary(m_202545)
+
+##############
+# DV: REDDIT #
+##############
+ANES_202547 <- ANES_prepost[ ,c("V200010b", "V200010c", "V200010d", "V202541d", "V202547", "V201233", "V201511x", "V201231x", "V201600", "V201507x", "V201005")]
+ANES_202547 <- ANES_202547[apply(ANES_202547, 1, function(row) all(row >= 0)), ]
+ANES_202547 <- ANES_202547 %>% filter(V202541d == 1)
+ANES_202547 <- na.omit(ANES_202547)
+
+# factor and relevel
+ANES_202547$V201233 <- as.factor(ANES_202547$V201233)
+ANES_202547$V201233 <- relevel(ANES_202547$V201233, ref = "1")
+ANES_202547$V201231x <- as.factor(ANES_202547$V201231x)
+ANES_202547$V201231x <- relevel(ANES_202547$V201231x, ref = "4")
+
+
+# design
+design_202547 <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = T,
+  data = ANES_202547
+)
+
+# ols regression
+m_202547 <- svyglm(V202547 ~ V201233 + V201231x + V201511x + V201600 + V201005 + V201507x, design = design_202547, family = gaussian())
+summary(m_202547)
+```
+
+## online campaign events 202013
+```{r, message = F}
+ANES_202013 <- ANES_prepost[ ,c("V200010b", "V200010c", "V200010d", "V202013", "V201233", "V201511x", "V201231x", "V201600", "V201507x", "V201005")]
+ANES_202013_2 <- ANES_prepost[, c("V200010b", "V200010c", "V200010d", "V202013", "V201233", "V201511x", "V201231x", "V201600", "V201507x", "V201005", "V201549x")]
+
+ANES_202013 <- ANES_202013[apply(ANES_202013, 1, function(row) all(row >= 0)), ]
+ANES_202013 <- na.omit(ANES_202013)
+ANES_202013_2 <- ANES_202013_2[apply(ANES_202013_2, 1, function(row) all(row >= 0)), ]
+ANES_202013_2 <- na.omit(ANES_202013_2)
+
+# recode online events
+ANES_202013_2 <- ANES_202013_2 %>%
+  mutate(V202013 = case_when(
+    V202013 == 1 ~ 1,
+    V202013 == 2 ~ 0
+  ))
+ANES_202013 <- ANES_202013 %>%
+  mutate(V202013 = case_when(
+    V202013 == 1 ~ 1,
+    V202013 == 2 ~ 0
+  ))
+
+## for pid
+ANES_202013_2D <- ANES_202013_2 %>% 
+  filter(V201231x <= 4)
+ANES_202013_2D <- ANES_202013_2D %>%
+  mutate(V201231x = case_when(
+    V201231x == 4 ~ 0,
+    V201231x == 3 ~ 1,
+    V201231x == 2 ~ 2,
+    V201231x == 1 ~ 3
+  ))
+
+ANES_202013_2R <- ANES_202013_2 %>% 
+  filter(V201231x >= 4)
+ANES_202013_2R <- ANES_202013_2R %>%
+  mutate(V201231x = case_when(
+    V201231x == 4 ~ 0,
+    V201231x == 5 ~ 1,
+    V201231x == 6 ~ 2,
+    V201231x == 7 ~ 3
+  ))
+
+# factor and relevel
+ANES_202013_2D$V201233 <- as.factor(ANES_202013_2D$V201233)
+ANES_202013_2D$V201233 <- relevel(ANES_202013_2D$V201233, ref = "1")
+ANES_202013_2R$V201233 <- as.factor(ANES_202013_2R$V201233)
+ANES_202013_2R$V201233 <- relevel(ANES_202013_2R$V201233, ref = "1")
+
+ANES_202013$V201233 <- as.factor(ANES_202013$V201233)
+ANES_202013$V201233 <- relevel(ANES_202013$V201233, ref = "1")
+ANES_202013$V201231x <- as.factor(ANES_202013$V201231x)
+ANES_202013$V201231x <- relevel(ANES_202013$V201231x, ref = "4")
+
+# design
+design_202013_2D <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = T,
+  data = ANES_202013_2D
+)
+design_202013_2R <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = T,
+  data = ANES_202013_2R
+)
+
+design_202013 <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = T,
+  data = ANES_202013
+)
+
+# logistic regression
+m_202013 <- svyglm(V202013 ~ V201233 + V201231x + V201511x  + V201600 + V201005 + V201507x, 
+                         design = design_202013, 
+                         family = binomial)
+summary(m_202013)
+
+m_202013_2D <- svyglm(V202013 ~ V201231x * V201233 + V201511x  + V201600 + V201005 + V201507x, 
+                         design = design_202013_2D, 
+                         family = binomial)
+m_202013_2R <- svyglm(V202013 ~ V201231x * V201233 + V201511x  + V201600 + V201005 + V201507x, 
+                         design = design_202013_2R, 
+                         family = binomial)
+
+summary(m_202013_2R)
+
+#########
+# Ridge #
+#########
+library(glmnet)
+
+#### Democrats ####
+dta_202013_2D <- model.frame(design_202013_2D)
+X1 <- model.matrix(~ V201231x * V201233 + V201511x + V201600 + 
+                   V201005 + V201507x - 1, data = dta_202013_2D)
+y1 <- dta_202013_2D$V202013
+weights_D <- weights(design_202013_2D)
+ridge_D <- cv.glmnet(X1, y1, family = "binomial", alpha = 0, 
+                      weights = weights_D, nfolds = 10)
+lambda_D <- ridge_D$lambda.min
+ridge_modelD <- glmnet(X1, y1, family = "binomial", alpha = 0, 
+                     lambda = lambda_D, weights = weights_D)
+coef(ridge_modelD)
+
+#### Republicans ####
+dta_202013_2R <- model.frame(design_202013_2R)
+X2 <- model.matrix(~ V201231x * V201233 + V201511x + V201600 + 
+                   V201005 + V201507x - 1, data = dta_202013_2R)
+y2 <- dta_202013_2R$V202013
+weights_R <- weights(design_202013_2R)
+ridge_R <- cv.glmnet(X2, y2, family = "binomial", alpha = 0, 
+                      weights = weights_R, nfolds = 10)
+lambda_R <- ridge_R$lambda.min
+ridge_modelR <- glmnet(X2, y2, family = "binomial", alpha = 0, 
+                     lambda = lambda_R, weights = weights_R)
+coef(ridge_modelR)
+
+```
+### base plot
+```{r}
+m202013_summary <- summary(m_202013)
+ctable_202013 <- m202013_summary$coefficients
+
+ratios_202013 <- data.frame(
+  variable = rownames(ctable_202013),
+  coef = ctable_202013[, "Estimate"],
+  se = ctable_202013[, "Std. Error"],
+  p_value = ctable_202013[, "Pr(>|t|)"]
+)
+ratios_202013 <- ratios_202013 %>%
+  mutate(
+    odds_ratio = exp(coef),
+    ci_lower = exp(coef - 1.96 * se),
+    ci_upper = exp(coef + 1.96 * se)
+  )
+v202013_odds <- ratios_202013 %>%
+  filter(grepl("V201233", variable))
+v202013_odds$level <- gsub("V201233", "Level ", v202013_odds$variable)
+
+event_base <- ggplot(v202013_odds, aes(x = variable, y = odds_ratio)) +
+  geom_point() +  # Plot the odds ratio as a point
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +  # Add CI bars
+  # coord_flip() ## no flip here 
+  theme_minimal() +
+  labs(title = "Figure 3: Coefficient Estimates of Trust on Online Political Events Participation",
+       caption = "Note: Bars represent 95% confidence intervals, estimates in odds ratios",
+       x = "Trust",
+       y = "Odds Ratio") +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  theme_bw() + 
+  theme(
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank(),  # Remove minor grid lines
+    panel.border = element_rect(color = "black", fill = NA),  # Keep the border
+    plot.title = element_text(hjust = 0, size = 11, face = "bold"),
+    plot.caption = element_text(hjust = 0, size = 9)
+  ) + 
+  scale_x_discrete(labels = c("Most of the time", "About half of the time", "Some of the time", "Never")) +
+  scale_y_continuous(limits = c(0, 10), breaks = seq(0, 10, by = 2)) # scale 0-10
+
+ggsave("event_base.pdf", event_base, width = 6, height = 4)
+```
+### ridge table
+```{r}
+library(knitr)
+library(kableExtra)
+coefs_ridgeD <- coef(ridge_modelD)
+coefs_ridgeR <- coef(ridge_modelR)
+
+vars_ridgetable <- c("V201231x", 
+                     "V201231x:V2012332", 
+                     "V201231x:V2012333", 
+                     "V201231x:V2012334", 
+                     "V201231x:V2012335")
+
+dta_ridgetable <- data.frame(
+  Variable = c("Partisanship Strength",
+               "Trust: Most of the time", 
+               "Trust: About half of the time",
+               "Trust: Some of the time",
+               "Trust: Never"),
+  Democrats = round(as.numeric(coefs_ridgeD[vars_ridgetable, ]), 3),
+  Republicans = round(as.numeric(coefs_ridgeR[vars_ridgetable, ]), 3)
+)
+
+dta_ridgetable %>%
+  kable("latex", 
+        caption = "Ridge Regression Coefficients by Party ID", 
+        booktabs = TRUE,
+        col.names = c("Variable", "Democrats", "Republicans"),
+        align = c("l", "c", "c"),
+        label = "tab:ridge_coefs_comparison") %>%
+  kable_styling(latex_options = c("striped", "hold_position")) %>%
+  add_header_above(c(" " = 1, "Party ID" = 2)) %>%
+  footnote(general = "Coefficients represent log odds ratios from ridge regression",
+           symbol = c("Models control for education, sex, age, and interest in politics."),
+           footnote_as_chunk = TRUE) %>%
+  save_kable("ridge_coefficients_combined.tex")
+
+```
+
+
+### base plot w/ id
+```{r}
+coefs_2D <- get_interaction_coefs(m_202013_2D, "Democrats")
+coefs_2R <- get_interaction_coefs(m_202013_2R, "Republicans")
+
+coefs_2 <- bind_rows(coefs_2D, coefs_2R)
+coefs_2 <- coefs_2 %>%
+  mutate(term = case_when(
+    grepl("V201231x:V201233.?2", term) ~ "Trust: Most of the time",
+    grepl("V201231x:V201233.?3", term) ~ "Trust: About half of the time",
+    grepl("V201231x:V201233.?4", term) ~ "Trust: Some of the time",
+    grepl("V201231x:V201233.?5", term) ~ "Trust: Never",
+    TRUE ~ term
+  )) %>%
+  mutate(term = factor(term, 
+                      levels = c("Trust: Most of the time", 
+                                "Trust: About half of the time",
+                                "Trust: Some of the time",
+                                "Trust: Never")))
+
+ggplot(coefs_2, aes(x = estimate, y = term, color = model)) +
+  geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), 
+                height = 0.2, position = position_dodge(width = 0.5)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "darkgray") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "darkgray") +
+  scale_x_log10(breaks = c(0, 1), labels = c("0", "1")) +  # Use log scale for odds ratios
+  scale_color_manual(values = c("Democrats" = "blue", "Republicans" = "red")) +
+  labs(title = "Coefficients of Trust on Participation in Online Campaign Events",
+       subtitle = " Moderated by Strength of Party ID",
+       x = "Odds Ratio",
+       y = "",
+       color = "Party ID Subset") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+### interaction plot
+```{r}
+m202013L_summary <- summary(m_202013_2a)
+ctable_202013L <- m202013L_summary$coefficients
+
+ratios_202013L <- data.frame(
+  variable = rownames(ctable_202013L),
+  coef = ctable_202013L[, "Estimate"],
+  se = ctable_202013L[, "Std. Error"],
+  p_value = ctable_202013L[, "Pr(>|t|)"]
+)
+ratios_202013L <- ratios_202013L %>%
+  mutate(
+    odds_ratio = exp(coef),
+    ci_lower = exp(coef - 1.96 * se),
+    ci_upper = exp(coef + 1.96 * se)
+  )
+
+v202013L_odds <- ratios_202013L %>%
+  filter(grepl("V201233\\d+:V201549x\\d+", variable))
+
+v202013L_odds$trust_level <- as.numeric(stringr::str_extract(v202013L_odds$variable, "(?<=V201233)\\d+"))
+v202013L_odds$race_level <- as.numeric(stringr::str_extract(v202013L_odds$variable, "(?<=V201549x)\\d+"))
+
+v202013L_odds$level <- paste0(
+  trust_levels[as.character(v202013L_odds$trust_level)], " x ",race_levels[as.character(v202013L_odds$race_level)]
+)
+
+v202013L_odds$ordered_var <- factor(
+  v202013L_odds$level, 
+  levels = unique(v202013L_odds$level[order(v202013L_odds$trust_level, v202013L_odds$race_level)])
+)
+
+ggplot(v202013L_odds, aes(x = ordered_var, y = odds_ratio)) +
+  geom_point(size = 1.5) +  
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) + 
+  coord_flip() +
+  theme_minimal() +
+  labs(x = "Trust × Race/Ethnicity Categories",
+       y = "Odds Ratio",
+       title = "Conditional Effects of Trust on Posting Content",
+       subtitle = "with 95% confidence intervals") +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red", alpha = 0.7) +
+  theme(axis.text.y = element_text(hjust = 0),
+        plot.title = element_text(face = "bold"),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(fill = NA, color = "gray80"))
+```
+
+# voting
+```{r}
+anes_202109x <- ANES_prepost[ ,c("V202109x", "V200010b", "V200010c", "V200010d", "V201233", "V201352", "V201231x", "V201511x", "V201600", "V201507x", "V201617x", "V201005", "V201549x")]
+anes_202109x <- anes_202109x[apply(anes_202109x, 1, function(row) all(row >= 0)), ]
+
+design_202109x <- svydesign(
+  ~V200010c,
+  strata = ~V200010d,
+  weights = ~V200010b,
+  nest = T,
+  data = anes_202109x
+)
+
+anes_202109x$V201233 <- as.factor(anes_202109x$V201233)
+anes_202109x$V201231x <- as.factor(anes_202109x$V201231x)
+
+m_202109x_logit <- svyglm(V202109x ~ V201233 + V201231x + V201352 + V201511x + V201600 + V201507x + V201617x + V201005, 
+                          design = design_202109x,
+                          family = binomial)
+summary(m_202109x_logit)
+```
+
+
+# regression tables
+```{r}
+library(stargazer)
+# baseline table 
+covlabels_base <- c("Strong D", "Not very strong D", "Indepedent-D", "Independent-R", "Not very strong R", "Strong R", "Trust-Never", "Trust-Some", "Trust-Most", "Trust-Always", "Education", "Age", "Interest", "Sex", "Constant")
+collabels_base <- c("Comment", "Online Event", "Facebook", "Twitter", "Reddit")
+stargazer(m_202029, m_202013, m_202543, m_202545, m_202547,
+          type = "latex",
+          covariate.labels = covlabels_base,
+          column.labels = collabels_base,
+          dep.var.labels.include = FALSE,
+          model.numbers = T,
+          digits = 3,
+          align = T,
+          out = "baseline_table.tex")
+
+# table w/ interaction
+covlabels_inter <- c("Trust-Never", "Trust-Some", "Trust-Most", "Trust-Always", 
+                     "Black", "Hispanic", "AANHPI", "Native American/Alaskan", "Multiple Races", 
+                     "Strong D", "Not very strong D", "Indepedent-D", "Independent-R", "Not very strong R", "Strong R", 
+                     "Education", "Sex", "Interest", "Age", 
+                     "Trust-Never * Black", "Trust-Some * Black", "Trust-Most * Black", "Trust-Always * Black",
+                     "Trust-Never * Hispanic", "Trust-Some * Hispanic", "Trust-Most * Hispanic", "Trust-Always * Hispanic",
+                     "Trust-Never * AANHPI", "Trust-Some * AANHPI", "Trust-Most * AANHPI", "Trust-Always * AANHPI",
+                     "Trust-Never * Native American/Alaskan", "Trust-Some * Native American/Alaskan", "Trust-Most * Native American/Alaskan", "Trust-Always * Native American/Alaskan",
+                     "Trust-Never * Multiple Races", "Trust-Some * Multiple Races", "Trust-Most * Multiple Races", "Trust-Always * Multiple Races",
+                     "Constant")
+collabels_inter <- c("Online Events", "Comment")
+stargazer(m_202013_2a, m_202029_2a,
+          type = "latex",
+          covariate.labels = covlabels_inter,
+          column.labels = collabels_inter,
+          dep.var.labels.include = FALSE,
+          model.numbers = T,
+          digits = 3,
+          align = T,
+          out = "interaction_table.tex")
+```
+
+# plots
+```{r}
+covariate_labels <- c("Strong D", "Not very strong D", "Indepedent-D", "Independent-R", "Not very strong R", "Strong R", "Trust: Most of the time", "Trust: About half of the time", "Trust: Some of the time", "Trust: Never", "Education", "Age", "Interest in politics", "Age", "Constant")
+col_labels <- c("Political Content", "Online Events", "Political content on Facebook", "Political content on Twitter", "Political content on Reddit")
+library(ggplot2)
+coefs_202543 <- coef(m_202543)
+Vcoefs_201233 <- coefs_202543[grep("V201233", names(coefs_202543))]
+coef_data_202543 <- data.frame(
+  level = c("1 (baseline)", paste(2:5)),
+  estimate = c(0, Vcoefs_201233) 
+)
+ggplot(coef_data_202543, aes(x = level, y = estimate)) +
+  geom_point(size = 3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  theme_minimal() +
+  labs(
+    title = "Coefficients for V201233 levels",
+    subtitle = "Level 1 is the baseline (reference) category",
+    x = "V201233 Level",
+    y = "Coefficient Estimate"
+  )
+
+library(stargazer)
+# online comment (logit)
+all_table <- stargazer(m_202029, m_202013, m_202543, m_202545, m_202547,
+          type = "latex", 
+          title = "Effect of Trust on Political Comment Online",
+          covariate.labels = covariate_labels,
+          column.labels = col_labels,
+          dep.var.labels.include = FALSE,
+          model.numbers = T,
+          digits = 3,
+          align = T)
+writeLines(all_table, "all_tables.tex")
+
+latex_output <- stargazer(m_202543, m_202545, m_202547,
+                         type = "latex", 
+                         title = "Effect of Trust on Political Comment Online",
+                         # covariate.labels = covariate_labels,
+                         # column.labels = col_labels,
+                         dep.var.labels.include = FALSE,
+                         model.numbers = TRUE,
+                         digits = 3,
+                         align = TRUE)
+
+writeLines(latex_output, "regression_tables.tex")
+
+interaction_table <- stargazer(m_202029_2D, m_202029_2R,
+          type = "latex", 
+          title = "Regression Models with Interaction term",
+          # covariate.labels = covariate_labels,
+          # column.labels = col_labels,
+          dep.var.labels.include = FALSE,
+          model.numbers = T,
+          digits = 3,
+          align = T)
+writeLines(interaction_table, "interaction_table.tex")
+```
+
+# topline
+```{r}
+library(memisc)
+anes_topline <- ANES_prepost[ ,c("V201233", "V201231x", "V202543", "V202545", "V202547", "V202013", "V202029", "V201600", "V201507x", "V201005", "V201511x")]
+
+description(anes_topline$V201233) <-  "How Often Trust Govt in Wash to Do What is Right (1-5 scale, higher = lower trust)"
+description(anes_topline$V201231x) <- "Summary: Party Identification (1-7 scale, higher = stronger Republican)"
+description(anes_topline$V202543) <- "When using Facebook, how often do you post information about political issues or candidates? (1-5 scale, higher = less frequent)"
+description(anes_topline$V202545) <- "When using Twitter, how often do you post information about political issues or candidates? (1-5 scale, higher = less frequent)"
+description(anes_topline$V202547) <- "When using Reddit, how often do you post information about political issues or candidates? (1-5 scale, higher = less frequent)"
+description(anes_topline$V202013) <- "Did you participate in any online political meetings, rallies, speeches, fundraisers, or things like that in support of a particular candidate? (1 = yes, 0 = no)"
+description(anes_topline$V202029) <- "During the past 12 months, have you posted a message or comment online about a political issue or campaign, or have you not done this in the past 12 months? (1 = yes, 0 = no)"
+description(anes_topline$V201600) <- "Sex (1 = female, 0 = male"
+description(anes_topline$V201507x) <- "Age (numeric in years)"
+description(anes_topline$V201005) <- " How often do you pay attention to what’s going on in government and politics? (1-5 scale, higher = less frequent)"
+description(anes_topline$V201511x) <- "Education (1-5 scale, higher = more education"
+
+labels(anes_topline$V201233) <- c(
+  "Always" = 1,
+  "Most of the time" = 2,
+  "About half of the time" = 3,
+  "Some of the time" = 4,
+  "Never" = 5
+)
+
+labels(anes_topline$V201231x) <- c(
+  "Strong Democrat" = 1,
+  "Not very strong Democrat" = 2,
+  "Independent, Lean Democrat" = 3,
+  "Independent" = 4,
+  "Independent, Lean Republican" = 5,
+  "Not very strong Republican" = 6,
+  "Strong Republican" = 7
+)
+
+labels(anes_topline$V202543) <- c(
+  "Always" = 1,
+  "Most of the time" = 2,
+  "About half of the time" = 3,
+  "Some of the time" = 4,
+  "Never" = 5
+)
+
+labels(anes_topline$V202545) <- c(
+  "Always" = 1,
+  "Most of the time" = 2,
+  "About half of the time" = 3,
+  "Some of the time" = 4,
+  "Never" = 5
+)
+
+labels(anes_topline$V202547) <- c(
+  "Always" = 1,
+  "Most of the time" = 2,
+  "About half of the time" = 3,
+  "Some of the time" = 4,
+  "Never" = 5
+)
+
+labels(anes_topline$V201600) <- c(
+  "Yes" = 1,
+  "No" = 0
+)
+
+labels(anes_topline$V201005) <- c(
+  "Always" = 1,
+  "Most of the time" = 2,
+  "About half of the time" = 3,
+  "Some of the time" = 4,
+  "Never" = 5
+)
+
+labels(anes_topline$V201005) <- c(
+  "Always" = 1,
+  "Most of the time" = 2,
+  "About half of the time" = 3,
+  "Some of the time" = 4,
+  "Never" = 5
+)
+
+topline <- capture.output(memisc::codebook(anes_topline))
+writeLines(topline, "codebook_output.txt")
+
+html_output <- c("<html><body><pre>", topline, "</pre></body></html>")
+writeLines(html_output, "~/ANES_codebook.html")
+
+```
